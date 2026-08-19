@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>IDoc Error ETL — Architecture Proposal</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #222; }
+  h1 { border-bottom: 3px solid #333; padding-bottom: 8px; }
+  h2 { margin-top: 40px; color: #1a1a1a; border-left: 4px solid #666; padding-left: 10px; }
+  h3 { margin-top: 24px; }
+  code, pre { background: #f4f4f4; border-radius: 4px; font-family: "SFMono-Regular", Consolas, monospace; }
+  code { padding: 2px 5px; font-size: 0.9em; }
+  pre { padding: 14px; overflow-x: auto; font-size: 0.85em; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: left; }
+  th { background: #eee; }
+  .note { background: #fff8e1; border-left: 4px solid #f0ad4e; padding: 10px 14px; margin: 20px 0; font-size: 0.95em; }
+  .pipeline { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 24px 0; }
+  .box { border: 2px solid #555; border-radius: 8px; padding: 10px 20px; text-align: center; min-width: 220px; background: #f9f9f9; }
+  .box.future { border-style: dashed; color: #666; }
+  .arrow { font-size: 20px; color: #555; }
+  footer { margin-top: 60px; font-size: 0.85em; color: #888; border-top: 1px solid #ddd; padding-top: 10px; }
+</style>
+</head>
+<body>
+
+<h1>IDoc Error ETL — Architecture Proposal</h1>
+
+<div class="note">
+  Note: sample source files for this project contained real SAP usernames, system IDs, and business data.
+  Replace any such identifiers with placeholders before sharing this document externally, per data-handling policy.
+</div>
+
+<p><strong>Guiding idea:</strong> build the toy demo as a pipeline of pure functions over folders,
+with every storage touchpoint hidden behind a small interface. That's what lets you swap
+"local folder + SQLite" for "Dataverse + central log" later without rewriting the ETL logic —
+you only write a new adapter.</p>
+
+<h2>1. Pipeline overview</h2>
+<div class="pipeline">
+  <div class="box">Landing zone<br><small>Raw CTRL/STAT/XML files</small></div>
+  <div class="arrow">&#8595;</div>
+  <div class="box">ETL 1 — sort &amp; land<br><small>By server + UUID</small></div>
+  <div class="arrow">&#8595;</div>
+  <div class="box">ETL 2 — monetize<br><small>XSLT rules by MESTYP</small></div>
+  <div class="arrow">&#8595;</div>
+  <div class="box">ETL 3 — load DW<br><small>SQLite via ORM</small></div>
+  <div class="arrow">&#8595;</div>
+  <div class="box">HTML dashboard<br><small>Static, deterministic</small></div>
+  <div class="box future">Central log / Dataverse<br><small>Future sink (Phase 1–2)</small></div>
+</div>
+
+<h2>2. Layering</h2>
+<ul>
+  <li><strong>Landing zone</strong> — anything dropped in the data lake root: <code>{DOCNUM}_CTRL.json</code>, <code>{DOCNUM}_STAT.json</code>, <code>{DOCNUM}_CONTENT.xml</code>.</li>
+  <li><strong>ETL 1 (route &amp; land)</strong> — reads <code>SNDPRN</code>/<code>RCVPRN</code> from <code>CTRL.CONTROL</code> to determine the server, creates <code>SERVER/{input,output,DW}</code> if missing, creates <code>SERVER/input/{GLOBAL_UUID}/</code> if missing, moves the triplet there, deletes from origin.</li>
+  <li><strong>ETL 2 (monetize)</strong> — for each UUID folder in <code>input</code>, looks up <code>MESTYP</code> in <code>monetizer.json</code>, resolves the matching <code>.xslt</code>, transforms <code>CONTENT.xml</code>, moves source files to <code>output</code>.</li>
+  <li><strong>ETL 3 (warehouse)</strong> — ORM layer (SQLAlchemy) creates the SQLite schema on first run, upserts into <code>ErrorEvents</code>, <code>Event_Meta</code>, <code>Event_meta_field</code>, <code>Messages</code>, and read-time aggregate views.</li>
+  <li><strong>Presentation</strong> — a deterministic static HTML generator (Jinja2) reads the SQLite tables and renders the dashboard + drill-down pages.</li>
+</ul>
+
+<h2>3. Key design decisions</h2>
+
+<h3>Storage abstraction</h3>
+<p>This is the piece that buys you Dataverse later. Define one small interface:</p>
+<pre><code>class EventSink(ABC):
+    def upsert_event(self, event: ErrorEvent) -> None: ...
+    def upsert_messages(self, event_uuid: str, messages: list[Message]) -> None: ...
+    def upsert_meta(self, event_uuid: str, meta: list[MetaField]) -> None: ...</code></pre>
+<p>Today you implement <code>SqliteEventSink</code>. Later you add <code>DataverseEventSink</code>
+(Dataverse Web API) or <code>CentralLogSink</code> (event hub / REST endpoint). ETL 3 only ever
+talks to <code>EventSink</code> — nothing else in the pipeline changes.</p>
+
+<h3>Monetization as strategy pattern</h3>
+<p><code>monetizer.json</code> is effectively a dispatch table <code>{MESTYP: xslt_path}</code>.
+Wrap it in a <code>Monetizer</code> class with a <code>.transform(mestyp, xml_bytes)</code> method
+(using <code>lxml</code> / <code>saxonche</code> for XSLT). New message types just mean a new
+<code>.xslt</code> + a JSON entry — no code change.</p>
+
+<h3>Schema validation on ingest</h3>
+<p>Define <code>pydantic</code> models for <code>CtrlRecord</code> and <code>StatRecord</code>
+once, and let ETL 1 fail loud-and-clear on malformed input rather than silently propagating
+bad data downstream.</p>
+
+<h3>Deterministic dashboard</h3>
+<p>Stable sort order (e.g. by <code>DOCNUM</code> or timestamp), no wall-clock-dependent content
+baked into IDs, templates rendered from DB state alone — so re-running the generator on the
+same DB always produces byte-identical HTML.</p>
+
+<h2>4. Folder layout for the toy demo</h2>
+<pre><code>project/
+  resources/
+    xslt/               # PROJECT02.xslt, MATMAS.xslt, ...
+    monetizer.json       # {"PROJECT": "xslt/PROJECT02.xslt", ...}
+  data_lake/              # inbox, files land here first
+  servers/
+    &lt;SERVER&gt;/
+      input/{uuid}/       # CTRL.json, STAT.json, CONTENT.xml
+      output/{uuid}/      # monetized CONTENT.xml
+      DW/
+        idoc_events.db     # sqlite
+  dashboard/
+    templates/            # Jinja2: index.html, event_detail.html
+    out/                  # generated static site
+  etl/
+    etl1_land.py
+    etl2_monetize.py
+    etl3_warehouse.py
+    sinks.py              # EventSink interface + SqliteEventSink
+    models.py             # pydantic + ORM models
+  orchestrate.py           # runs 1 -&gt; 2 -&gt; 3 -&gt; dashboard, toy-demo CLI</code></pre>
+
+<h2>5. Data warehouse refinement</h2>
+<ul>
+  <li>Make the four "Aggregates" (monthly, by system, by error type, cost) <strong>SQL views</strong>,
+    not physical tables — keeps the SQLite demo simpler and always in sync.</li>
+  <li><code>Cost of the error</code> needs a rule to populate <code>Amount</code>/<code>Currency</code>
+    on <code>ErrorEvents</code> — likely a lookup table mapping <code>(MESTYP, STATUS)</code> →
+    estimated cost/severity, since the raw IDoc doesn't carry a cost field itself.</li>
+</ul>
+
+<h2>6. Dashboard / drill-down</h2>
+<ul>
+  <li>Landing page: table of <code>ErrorEvents</code> (sortable by date, system, type, module, status),
+    plus small summary charts.</li>
+  <li>Each row links to a static <code>event_detail_{uuid}.html</code> page rendered from
+    <code>Event_Meta</code> + <code>Messages</code> + the raw <code>CONTENT.xml</code> — all
+    pre-generated, no server needed.</li>
+</ul>
+
+<h2>7. Roadmap</h2>
+<table>
+  <tr><th>Phase</th><th>Storage</th><th>Dashboard</th><th>Notes</th></tr>
+  <tr>
+    <td>0 — toy demo</td>
+    <td>Local folders + SQLite</td>
+    <td>Static HTML (Jinja2)</td>
+    <td>What we're building now</td>
+  </tr>
+  <tr>
+    <td>1 — team pilot</td>
+    <td>Same, + push a copy of events to a central log (append-only JSONL or message queue)</td>
+    <td>Same static HTML, refreshed on a schedule</td>
+    <td><code>EventSink</code> gets a second implementation, run side-by-side</td>
+  </tr>
+  <tr>
+    <td>2 — org rollout</td>
+    <td>Dataverse (via Web API) as system of record</td>
+    <td>Power BI over Dataverse, or static HTML as fallback</td>
+    <td>ETL 1/2 logic untouched; only <code>etl3_warehouse.py</code>'s sink swaps</td>
+  </tr>
+</table>
+
+<footer>Generated from a Claude conversation — IDoc error ETL architecture proposal.</footer>
+
+</body>
+</html>
