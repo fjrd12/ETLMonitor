@@ -1,0 +1,16 @@
+{
+  "_comment": "Toy-demo (MESTYP, STATUS) -> estimated cost/severity lookup. The raw IDoc carries no cost field, so ETL 3 joins against this table to populate ErrorEvents.Amount/Currency. Real values should come from the business, not this file.",
+  "rules": [
+    {"mestyp": "PROJECT",      "status": "29", "amount": 25.0,  "currency": "USD", "severity": "medium"},
+    {"mestyp": "ORDERS",       "status": "51", "amount": 150.0, "currency": "USD", "severity": "high"},
+    {"mestyp": "ORDERS",       "status": "02", "amount": 50.0,  "currency": "USD", "severity": "low"},
+    {"mestyp": "/SCWM/WMTORD", "status": "29", "amount": 75.0,  "currency": "USD", "severity": "medium"},
+    {"mestyp": "ZSHPMNT858",   "status": "26", "amount": 100.0, "currency": "USD", "severity": "medium"},
+    {"mestyp": "ORDCHG",       "status": "02", "amount": 50.0,  "currency": "USD", "severity": "low"},
+    {"mestyp": "ZEPPROJ",      "status": "26", "amount": 40.0,  "currency": "USD", "severity": "low"},
+    {"mestyp": "SHPMNT",       "status": "26", "amount": 100.0, "currency": "USD", "severity": "medium"},
+    {"mestyp": "INVOIC",       "status": "02", "amount": 200.0, "currency": "USD", "severity": "high"},
+    {"mestyp": "INVOIC",       "status": "51", "amount": 300.0, "currency": "USD", "severity": "high"}
+  ],
+  "default": {"amount": 0.0, "currency": "USD", "severity": "unknown"}
+}

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>IDoc Error Dashboard</title>
+<style>{{ base_css|safe }}</style>
+</head>
+<body>
+
+<h1>IDoc Error Dashboard</h1>
+<p class="subtitle">{{ events|length }} error event(s) across {{ servers|length }} server(s)</p>
+
+<div class="summary-grid">
+  <div class="panel">
+    <h3>By month</h3>
+    <table>
+      <tr><th>Month</th><th>Events</th><th>Total cost</th></tr>
+      {% for row in agg_monthly %}
+      <tr><td>{{ row.month }}</td><td>{{ row.event_count }}</td><td>{{ "%.2f"|format(row.total_amount) }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="panel">
+    <h3>By system</h3>
+    <table>
+      <tr><th>Server</th><th>Sender</th><th>Receiver</th><th>Events</th><th>Total cost</th></tr>
+      {% for row in agg_by_system %}
+      <tr><td>{{ row.server }}</td><td>{{ row.sndprn }}</td><td>{{ row.rcvprn }}</td><td>{{ row.event_count }}</td><td>{{ "%.2f"|format(row.total_amount) }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="panel">
+    <h3>By error type</h3>
+    <table>
+      <tr><th>MESTYP</th><th>Status</th><th>Events</th><th>Total cost</th></tr>
+      {% for row in agg_by_error_type %}
+      <tr><td>{{ row.mestyp }}</td><td>{{ row.status }}</td><td>{{ row.event_count }}</td><td>{{ "%.2f"|format(row.total_amount) }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="panel">
+    <h3>Cost by server</h3>
+    <table>
+      <tr><th>Server</th><th>Events</th><th>Total cost</th><th>Currency</th></tr>
+      {% for row in agg_cost %}
+      <tr><td>{{ row.server }}</td><td>{{ row.event_count }}</td><td>{{ "%.2f"|format(row.total_amount) }}</td><td>{{ row.currency }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <table id="events">
+    <thead>
+      <tr>
+        <th class="sortable" data-type="text">Date</th>
+        <th class="sortable" data-type="text">Server</th>
+        <th class="sortable" data-type="text">MESTYP</th>
+        <th class="sortable" data-type="text">Status</th>
+        <th class="sortable" data-type="num">DocNum</th>
+        <th class="sortable" data-type="num">Cost</th>
+        <th>Severity</th>
+        <th>Detail</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in events %}
+      <tr>
+        <td>{{ e.event_date }}</td>
+        <td>{{ e.server }}</td>
+        <td>{{ e.mestyp }}</td>
+        <td>{{ e.status }}</td>
+        <td>{{ e.docnum }}</td>
+        <td>{{ "%.2f"|format(e.amount or 0) }} {{ e.currency or "" }}</td>
+        <td><span class="badge {{ e.severity }}">{{ e.severity }}</span></td>
+        <td><a href="{{ e.detail_href }}">view</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+  document.querySelectorAll("#events th.sortable").forEach(function (th, colIndex) {
+    var asc = true;
+    th.addEventListener("click", function () {
+      var table = th.closest("table");
+      var tbody = table.querySelector("tbody");
+      var rows = Array.prototype.slice.call(tbody.querySelectorAll("tr"));
+      var type = th.dataset.type;
+      rows.sort(function (a, b) {
+        var av = a.children[colIndex].textContent.trim();
+        var bv = b.children[colIndex].textContent.trim();
+        if (type === "num") { av = parseFloat(av) || 0; bv = parseFloat(bv) || 0; return asc ? av - bv : bv - av; }
+        return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+      });
+      rows.forEach(function (r) { tbody.appendChild(r); });
+      asc = !asc;
+    });
+  });
+</script>
+
+</body>
+</html>

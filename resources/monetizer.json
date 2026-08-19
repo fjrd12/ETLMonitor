@@ -1,0 +1,10 @@
+{
+  "PROJECT": "xslt/identity.xslt",
+  "ORDERS": "xslt/identity.xslt",
+  "ORDCHG": "xslt/identity.xslt",
+  "/SCWM/WMTORD": "xslt/identity.xslt",
+  "ZSHPMNT858": "xslt/identity.xslt",
+  "ZEPPROJ": "xslt/identity.xslt",
+  "SHPMNT": "xslt/identity.xslt",
+  "INVOIC": "xslt/identity.xslt"
+}

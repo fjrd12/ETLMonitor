@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>IDoc Error {{ event.docnum }}</title>
+<style>{{ base_css|safe }}</style>
+</head>
+<body>
+
+<a class="back-link" href="index.html">&larr; back to dashboard</a>
+<h1>DOCNUM {{ event.docnum }}</h1>
+<p class="subtitle">{{ event.mestyp }} / {{ event.idoctp }} &mdash; status {{ event.status }} &mdash; <span class="badge {{ event.severity }}">{{ event.severity }}</span></p>
+
+<div class="panel">
+  <table>
+    <tr><td class="field-name">Server</td><td>{{ event.server }}</td></tr>
+    <tr><td class="field-name">Sender</td><td>{{ event.sndprn }}</td></tr>
+    <tr><td class="field-name">Receiver</td><td>{{ event.rcvprn }}</td></tr>
+    <tr><td class="field-name">Date / time</td><td>{{ event.event_date }} {{ event.event_time }}</td></tr>
+    <tr><td class="field-name">User</td><td>{{ event.uname }}</td></tr>
+    <tr><td class="field-name">Message</td><td>{{ event.statxt }}</td></tr>
+    <tr><td class="field-name">Estimated cost</td><td>{{ "%.2f"|format(event.amount or 0) }} {{ event.currency or "" }}</td></tr>
+  </table>
+</div>
+
+<div class="panel">
+  <h3>Messages</h3>
+  <table>
+    <tr><th>Counter</th><th>Status</th><th>Type</th><th>Text</th><th>User</th><th>Logged</th></tr>
+    {% for m in messages %}
+    <tr><td>{{ m.countr }}</td><td>{{ m.status }}</td><td>{{ m.statyp }}</td><td>{{ m.statxt }}</td><td>{{ m.uname }}</td><td>{{ m.logdat }} {{ m.logtim }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="panel">
+  <h3>Segments</h3>
+  {% for seg in meta %}
+  <h4>{{ seg.segment }}</h4>
+  <table class="meta-table">
+    {% for f in seg.fields %}
+    <tr><td class="field-name">{{ f.field_name }}</td><td>{{ f.field_value }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endfor %}
+</div>
+
+<div class="panel">
+  <h3>Raw CONTENT.xml</h3>
+  <pre class="raw-xml">{{ raw_xml }}</pre>
+</div>
+
+</body>
+</html>
