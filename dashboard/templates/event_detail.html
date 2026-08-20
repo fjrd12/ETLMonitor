@@ -2,16 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>IDoc Error {{ event.docnum }}</title>
+<title>{{ title }} &mdash; DOCNUM {{ event.docnum }}</title>
 <style>{{ base_css|safe }}</style>
 </head>
 <body>
+
+<nav class="nav-stripe">
+  {% for id, label in nav %}<a href="#{{ id }}">{{ label }}</a>{% endfor %}
+</nav>
 
 <a class="back-link" href="index.html">&larr; back to dashboard</a>
 <h1>DOCNUM {{ event.docnum }}</h1>
 <p class="subtitle">{{ event.mestyp }} / {{ event.idoctp }} &mdash; status {{ event.status }} &mdash; <span class="badge {{ event.severity }}">{{ event.severity }}</span></p>
 
-<div class="panel">
+{% if last_message %}
+<div class="callout">
+  <div class="field-name">Last error message</div>
+  {{ last_message.statxt }}
+  <div class="subtitle">{{ last_message.logdat }} {{ last_message.logtim }} &mdash; {{ last_message.uname }} &mdash; status {{ last_message.status }}</div>
+</div>
+{% endif %}
+
+<div class="panel" id="summary">
+  <h3>Summary</h3>
   <table>
     <tr><td class="field-name">Server</td><td>{{ event.server }}</td></tr>
     <tr><td class="field-name">Sender</td><td>{{ event.sndprn }}</td></tr>
@@ -23,9 +36,9 @@
   </table>
 </div>
 
-<div class="panel">
+<div class="panel" id="valuation">
   <h3>Business valuation</h3>
-  <p class="subtitle">Computed by resources/xslt/*.xslt at ETL 2 from the raw IDoc payload &mdash; see <a href="#raw-xml">raw CONTENT.xml</a> below.</p>
+  <p class="subtitle">Computed by resources/xslt/*.xslt at ETL 2 from the raw IDoc payload &mdash; see <a href="#idoc-content">IDoc content</a> below.</p>
   <table>
     <tr><th>Primary</th><th>Type</th><th class="num">Value</th><th>Unit</th><th>Status</th><th>Source</th></tr>
     {% for v in valuations %}
@@ -43,17 +56,7 @@
   </table>
 </div>
 
-<div class="panel">
-  <h3>Messages</h3>
-  <table>
-    <tr><th>Counter</th><th>Status</th><th>Type</th><th>Text</th><th>User</th><th>Logged</th></tr>
-    {% for m in messages %}
-    <tr><td>{{ m.countr }}</td><td>{{ m.status }}</td><td>{{ m.statyp }}</td><td>{{ m.statxt }}</td><td>{{ m.uname }}</td><td>{{ m.logdat }} {{ m.logtim }}</td></tr>
-    {% endfor %}
-  </table>
-</div>
-
-<div class="panel">
+<div class="panel" id="control-record">
   <h3>Control record (EDI_DC40)</h3>
   {% if control_record %}
   <table class="meta-table">
@@ -66,7 +69,7 @@
   {% endif %}
 </div>
 
-<div class="panel">
+<div class="panel" id="status">
   <h3>Status (EDI_DS40)</h3>
   {% if status_table.rows %}
   <div class="table-scroll">
@@ -82,8 +85,18 @@
   {% endif %}
 </div>
 
-<div class="panel" id="raw-xml">
-  <h3>Raw CONTENT.xml</h3>
+<div class="panel" id="messages">
+  <h3>Messages</h3>
+  <table>
+    <tr><th>Counter</th><th>Status</th><th>Type</th><th>Text</th><th>User</th><th>Logged</th></tr>
+    {% for m in messages %}
+    <tr><td>{{ m.countr }}</td><td>{{ m.status }}</td><td>{{ m.statyp }}</td><td>{{ m.statxt }}</td><td>{{ m.uname }}</td><td>{{ m.logdat }} {{ m.logtim }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="panel" id="idoc-content">
+  <h3>IDoc content</h3>
   <pre class="raw-xml">{{ raw_xml }}</pre>
 </div>
 

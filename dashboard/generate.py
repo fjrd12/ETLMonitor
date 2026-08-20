@@ -9,15 +9,35 @@ content is baked in.
 from __future__ import annotations
 
 import sqlite3
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 from lxml import etree
 
+from dashboard import charts
 from etl.common import safe_uuid_dirname
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+DASHBOARD_TITLE = "B2B Communication Analysis"
+
+NAV_INDEX = [
+    ("error-trend", "Error Trend"),
+    ("by-system", "By system"),
+    ("by-error-type", "By error type"),
+    ("cost-by-server", "Cost by server"),
+    ("events", "Events"),
+]
+
+NAV_DETAIL = [
+    ("summary", "Summary"),
+    ("valuation", "Valuation"),
+    ("control-record", "Control record"),
+    ("status", "Status"),
+    ("messages", "Messages"),
+    ("idoc-content", "IDoc content"),
+]
 
 # Status -> badge CSS class (reuses the severity badge palette in base.css).
 VALUATION_BADGE = {
@@ -67,7 +87,7 @@ def load_all_events(servers_root: Path) -> list[dict]:
     return events
 
 
-def load_detail(db_path: str, event_uuid: str) -> tuple[list[dict], dict | None, dict, list[dict]]:
+def load_detail(db_path: str, event_uuid: str) -> tuple[list[dict], dict | None, dict, list[dict], dict | None]:
     with sqlite3.connect(db_path) as conn:
         messages = _rows(
             conn,
@@ -99,7 +119,8 @@ def load_detail(db_path: str, event_uuid: str) -> tuple[list[dict], dict | None,
     control_record = next((m for m in meta if m["segment"] == "EDI_DC40"), None)
     status_records = [m for m in meta if m["segment"] == "EDI_DS40"]
     status_table = tabulate_records(status_records)
-    return messages, control_record, status_table, valuations
+    last_message = max(messages, key=lambda m: (m["logdat"], m["logtim"], m["countr"]), default=None)
+    return messages, control_record, status_table, valuations, last_message
 
 
 def tabulate_records(records: list[dict]) -> dict:
@@ -140,45 +161,47 @@ def annotate_valuation(e: dict) -> None:
 
 
 def build_monthly_matrix(events: list[dict]) -> dict:
-    """One wide 'by month' report merging event volume, per-MESTYP counts,
-    and per-(valuation_type,unit) totals. Columns are ordered by their total
-    value across all months, highest first.
+    """One wide 'Error Trend' report merging event volume, per-MESTYP counts,
+    and per-currency monetary totals (non-monetary valuation types — object
+    counts, quantities, unvalued — are left out; the timeline chart above
+    covers the same monetary ground with a legend). Columns are ordered by
+    their total value across all months, highest first.
     """
     months = sorted({e["event_date"][:7] for e in events})
     mestyp_totals: dict[str, float] = defaultdict(float)
-    unit_totals: dict[tuple[str, str], float] = defaultdict(float)
+    currency_totals: dict[str, float] = defaultdict(float)
     for e in events:
         mestyp_totals[e["mestyp"]] += e["valuation_value"] or 0.0
-        unit_totals[(e["valuation_type"], e["valuation_unit"] or "")] += e["valuation_value"] or 0.0
+        if e["valuation_type"] == "AMOUNT" and e["valuation_unit"]:
+            currency_totals[e["valuation_unit"]] += e["valuation_value"] or 0.0
 
     mestyp_columns = sorted(mestyp_totals, key=lambda m: mestyp_totals[m], reverse=True)
-    unit_columns = sorted(unit_totals, key=lambda k: unit_totals[k], reverse=True)
+    currency_columns = sorted(currency_totals, key=lambda c: currency_totals[c], reverse=True)
 
     def empty_bucket():
         return {
             "events": 0,
             "by_mestyp": defaultdict(int),
-            "by_unit": defaultdict(float),
+            "by_currency": defaultdict(float),
         }
 
     buckets: dict[str, dict] = defaultdict(empty_bucket)
     total_bucket = empty_bucket()
     for e in events:
         month = e["event_date"][:7]
-        b = buckets[month]
-        b["events"] += 1
-        b["by_mestyp"][e["mestyp"]] += 1
-        b["by_unit"][(e["valuation_type"], e["valuation_unit"] or "")] += e["valuation_value"] or 0.0
-        total_bucket["events"] += 1
-        total_bucket["by_mestyp"][e["mestyp"]] += 1
-        total_bucket["by_unit"][(e["valuation_type"], e["valuation_unit"] or "")] += e["valuation_value"] or 0.0
+        is_amount = e["valuation_type"] == "AMOUNT" and e["valuation_unit"]
+        for b in (buckets[month], total_bucket):
+            b["events"] += 1
+            b["by_mestyp"][e["mestyp"]] += 1
+            if is_amount:
+                b["by_currency"][e["valuation_unit"]] += e["valuation_value"] or 0.0
 
     def row_for(month: str, b: dict) -> dict:
         return {
             "month": month,
             "events": fmt_int(b["events"]),
             "by_mestyp": [fmt_int(b["by_mestyp"].get(m, 0)) if b["by_mestyp"].get(m) else "—" for m in mestyp_columns],
-            "by_unit": [fmt_num(b["by_unit"].get(u, 0.0)) if b["by_unit"].get(u) else "—" for u in unit_columns],
+            "by_currency": [fmt_num(b["by_currency"].get(c, 0.0)) if b["by_currency"].get(c) else "—" for c in currency_columns],
         }
 
     rows = [row_for(m, buckets[m]) for m in months]
@@ -186,7 +209,7 @@ def build_monthly_matrix(events: list[dict]) -> dict:
 
     return {
         "mestyp_columns": mestyp_columns,
-        "unit_columns": [f"{unit} ({vtype})" if unit else vtype for vtype, unit in unit_columns],
+        "currency_columns": currency_columns,
         "rows": rows,
         "total_row": total_row,
     }
@@ -211,9 +234,37 @@ def aggregate(events: list[dict]) -> dict[str, list[dict]]:
         return out
 
     agg_by_system = group_sum(
-        lambda e: (e["server"], e["sndprn"], e["rcvprn"]), ("server", "sndprn", "rcvprn"), sort_key="total_amount"
+        lambda e: (e["server"], e["sndprn"], e["rcvprn"], e["currency"]),
+        ("server", "sndprn", "rcvprn", "currency"),
+        sort_key="total_amount",
     )
-    agg_by_error_type = group_sum(lambda e: (e["mestyp"], e["status"]), ("mestyp", "status"), sort_key="event_count")
+
+    error_type_totals: dict[tuple, dict] = defaultdict(
+        lambda: {"event_count": 0, "total_amount": 0.0, "messages": Counter()}
+    )
+    for e in events:
+        t = error_type_totals[(e["mestyp"], e["status"], e["currency"])]
+        t["event_count"] += 1
+        t["total_amount"] += e["amount"] or 0.0
+        t["messages"][e["statxt"]] += 1
+    agg_by_error_type = []
+    for (mestyp, status, currency), t in error_type_totals.items():
+        top_msg, _ = t["messages"].most_common(1)[0]
+        distinct = len(t["messages"])
+        message = top_msg if distinct == 1 else f"{top_msg} (+{distinct - 1} more)"
+        agg_by_error_type.append(
+            {
+                "mestyp": mestyp,
+                "status": status,
+                "currency": currency,
+                "event_count": t["event_count"],
+                "total_amount": t["total_amount"],
+                "event_count_fmt": fmt_int(t["event_count"]),
+                "total_amount_fmt": fmt_num(t["total_amount"]),
+                "message": message,
+            }
+        )
+    agg_by_error_type.sort(key=lambda r: r["event_count"], reverse=True)
 
     cost_totals: dict[tuple, dict] = defaultdict(lambda: {"event_count": 0, "total_amount": 0.0})
     for e in events:
@@ -228,11 +279,34 @@ def aggregate(events: list[dict]) -> dict[str, list[dict]]:
         row["event_count_fmt"] = fmt_int(row["event_count"])
         row["total_amount_fmt"] = fmt_num(row["total_amount"])
 
+    all_months = sorted({e["event_date"][:7] for e in events})
+    month_currency_amounts: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    currencies_seen: set[str] = set()
+    for e in events:
+        if e["amount"] is not None:
+            month_currency_amounts[e["event_date"][:7]][e["currency"]] += e["amount"]
+            currencies_seen.add(e["currency"])
+    chart_series = [
+        (f"Total cost ({cur})", [month_currency_amounts[m].get(cur, 0.0) for m in all_months])
+        for cur in sorted(currencies_seen)
+    ]
+    chart_month_amount = charts.multi_line_chart(all_months, chart_series)
+
+    mestyp_counts = Counter(e["mestyp"] for e in events)
+    chart_mestyp_pie = charts.pie_chart(sorted(mestyp_counts.items(), key=lambda kv: kv[1], reverse=True))
+
+    chart_server_cost = charts.bar_chart_by_category(
+        [(row["server"], row["total_amount"], row["currency"]) for row in agg_cost]
+    )
+
     return {
         "agg_by_system": agg_by_system,
         "agg_by_error_type": agg_by_error_type,
         "agg_cost": agg_cost,
         "monthly": build_monthly_matrix(events),
+        "chart_month_amount": chart_month_amount,
+        "chart_mestyp_pie": chart_mestyp_pie,
+        "chart_server_cost": chart_server_cost,
     }
 
 
@@ -251,6 +325,8 @@ def generate(servers_root: Path, out_dir: Path) -> int:
     index_tpl = env.get_template("index.html")
     (out_dir / "index.html").write_text(
         index_tpl.render(
+            title=DASHBOARD_TITLE,
+            nav=NAV_INDEX,
             events=events,
             servers=servers,
             base_css=base_css,
@@ -261,13 +337,16 @@ def generate(servers_root: Path, out_dir: Path) -> int:
 
     detail_tpl = env.get_template("event_detail.html")
     for e in events:
-        messages, control_record, status_table, valuations = load_detail(e["_db_path"], e["event_uuid"])
+        messages, control_record, status_table, valuations, last_message = load_detail(e["_db_path"], e["event_uuid"])
         content_path = find_content_xml(servers_root, e["server"], e["event_uuid"])
         raw_xml = pretty_xml(content_path) if content_path else ""
         (out_dir / e["detail_href"]).write_text(
             detail_tpl.render(
+                title=DASHBOARD_TITLE,
+                nav=NAV_DETAIL,
                 event=e,
                 messages=messages,
+                last_message=last_message,
                 control_record=control_record,
                 status_table=status_table,
                 valuations=valuations,

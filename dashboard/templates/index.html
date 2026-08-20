@@ -2,65 +2,83 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>IDoc Error Dashboard</title>
+<title>{{ title }}</title>
 <style>{{ base_css|safe }}</style>
 </head>
 <body>
 
-<h1>IDoc Error Dashboard</h1>
+<nav class="nav-stripe">
+  {% for id, label in nav %}<a href="#{{ id }}">{{ label }}</a>{% endfor %}
+</nav>
+
+<h1>{{ title }}</h1>
 <p class="subtitle">{{ events|length }} error event(s) across {{ servers|length }} server(s)</p>
 
-<div class="panel">
-  <h3>By month</h3>
-  <p class="subtitle">Events, breakdown by message type, and breakdown by business-value unit &mdash; columns ordered by total value, highest first.</p>
+<div class="panel" id="error-trend">
+  <h3>Error Trend</h3>
+  <p class="subtitle">Monetary cost by month. Legend shows what's plotted and its currency; hover a point for the exact date and value.</p>
+  {{ chart_month_amount|safe }}
+  <p class="subtitle">Events, breakdown by message type, and monetary totals by currency &mdash; columns ordered by total value, highest first.</p>
   <div class="table-scroll">
     <table>
       <tr>
         <th>Month</th>
         <th class="num">Events</th>
         {% for m in monthly.mestyp_columns %}<th class="num">{{ m }}</th>{% endfor %}
-        {% for u in monthly.unit_columns %}<th class="num">{{ u }}</th>{% endfor %}
+        {% for c in monthly.currency_columns %}<th class="num">{{ c }}</th>{% endfor %}
       </tr>
       {% for row in monthly.rows %}
       <tr>
         <td>{{ row.month }}</td>
         <td class="num">{{ row.events }}</td>
         {% for v in row.by_mestyp %}<td class="num">{{ v }}</td>{% endfor %}
-        {% for v in row.by_unit %}<td class="num">{{ v }}</td>{% endfor %}
+        {% for v in row.by_currency %}<td class="num">{{ v }}</td>{% endfor %}
       </tr>
       {% endfor %}
       <tr class="total-row">
         <td>Total</td>
         <td class="num">{{ monthly.total_row.events }}</td>
         {% for v in monthly.total_row.by_mestyp %}<td class="num">{{ v }}</td>{% endfor %}
-        {% for v in monthly.total_row.by_unit %}<td class="num">{{ v }}</td>{% endfor %}
+        {% for v in monthly.total_row.by_currency %}<td class="num">{{ v }}</td>{% endfor %}
       </tr>
     </table>
   </div>
 </div>
 
-<div class="panel">
+<div class="panel" id="by-system">
   <h3>By system</h3>
-  <table>
-    <tr><th>Server</th><th>Sender</th><th>Receiver</th><th class="num">Events</th><th class="num">Total cost</th></tr>
-    {% for row in agg_by_system %}
-    <tr><td>{{ row.server }}</td><td>{{ row.sndprn }}</td><td>{{ row.rcvprn }}</td><td class="num">{{ row.event_count_fmt }}</td><td class="num">{{ row.total_amount_fmt }}</td></tr>
-    {% endfor %}
-  </table>
+  <div class="section-columns">
+    <div class="table-scroll">
+      <table>
+        <tr><th>Sender</th><th>Receiver</th><th class="num">Events</th><th class="num">Total cost</th><th>Currency</th></tr>
+        {% for row in agg_by_system %}
+        <tr><td>{{ row.sndprn }}</td><td>{{ row.rcvprn }}</td><td class="num">{{ row.event_count_fmt }}</td><td class="num">{{ row.total_amount_fmt }}</td><td>{{ row.currency or "—" }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+    <div>
+      <h4>Events by message type</h4>
+      {{ chart_mestyp_pie|safe }}
+    </div>
+  </div>
 </div>
 
-<div class="panel">
+<div class="panel" id="by-error-type">
   <h3>By error type</h3>
-  <table>
-    <tr><th>MESTYP</th><th>Status</th><th class="num">Events</th><th class="num">Total cost</th></tr>
-    {% for row in agg_by_error_type %}
-    <tr><td>{{ row.mestyp }}</td><td>{{ row.status }}</td><td class="num">{{ row.event_count_fmt }}</td><td class="num">{{ row.total_amount_fmt }}</td></tr>
-    {% endfor %}
-  </table>
+  <div class="table-scroll">
+    <table>
+      <tr><th>MESTYP</th><th>Status</th><th class="num">Events</th><th class="num">Total cost</th><th>Currency</th><th>Message</th></tr>
+      {% for row in agg_by_error_type %}
+      <tr><td>{{ row.mestyp }}</td><td>{{ row.status }}</td><td class="num">{{ row.event_count_fmt }}</td><td class="num">{{ row.total_amount_fmt }}</td><td>{{ row.currency or "—" }}</td><td>{{ row.message }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
 </div>
 
-<div class="panel">
+<div class="panel" id="cost-by-server">
   <h3>Cost by server</h3>
+  <p class="subtitle">Total monetary cost communicated per server. Bar color and the legend indicate currency.</p>
+  {{ chart_server_cost|safe }}
   <table>
     <tr><th>Server</th><th class="num">Events</th><th class="num">Total cost</th><th>Currency</th></tr>
     {% for row in agg_cost %}
@@ -69,10 +87,10 @@
   </table>
 </div>
 
-<div class="panel">
+<div class="panel" id="events">
   <div class="col-filter" id="col-filter"></div>
   <div class="table-scroll">
-    <table id="events">
+    <table id="events-table">
       <thead>
         <tr>
           {% for key, label, dtype in columns %}
@@ -100,7 +118,7 @@
 
 <script>
   (function () {
-    var table = document.getElementById("events");
+    var table = document.getElementById("events-table");
     var headers = table.querySelectorAll("th");
 
     // Sorting (skips the trailing "Detail" column, which has no data-type).
