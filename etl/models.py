@@ -78,6 +78,18 @@ class Message:
 
 
 @dataclass
+class Valuation:
+    """One <VALUATION> entry from a monetizer XSLT's <IDOC_VALUATION> output."""
+
+    type: str
+    value: float
+    unit: str
+    source: str
+    status: str
+    primary: bool = False
+
+
+@dataclass
 class ErrorEvent:
     event_uuid: str
     docnum: int
@@ -96,6 +108,13 @@ class ErrorEvent:
     currency: str | None = None
     severity: str = "unknown"
     monetized: bool = False
+    # Denormalized copy of the primary Valuation, for cheap dashboard listing
+    # without a join; the full set lives in Event_Valuations.
+    valuation_type: str = "NONE"
+    valuation_value: float | None = None
+    valuation_unit: str | None = None
+    valuation_status: str = "UNSUPPORTED_MESTYP_OR_IDOCTYP"
+    valuation_source: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -125,10 +144,16 @@ class ErrorEventRow(Base):
     currency: Mapped[str | None] = mapped_column(String, nullable=True)
     severity: Mapped[str] = mapped_column(String, default="unknown")
     monetized: Mapped[bool] = mapped_column(default=False)
+    valuation_type: Mapped[str] = mapped_column(String, default="NONE")
+    valuation_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    valuation_unit: Mapped[str | None] = mapped_column(String, nullable=True)
+    valuation_status: Mapped[str] = mapped_column(String, default="UNSUPPORTED_MESTYP_OR_IDOCTYP")
+    valuation_source: Mapped[str | None] = mapped_column(String, nullable=True)
     loaded_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
     meta: Mapped[list["EventMetaRow"]] = relationship(back_populates="event", cascade="all, delete-orphan")
     messages: Mapped[list["MessageRow"]] = relationship(back_populates="event", cascade="all, delete-orphan")
+    valuations: Mapped[list["ValuationRow"]] = relationship(back_populates="event", cascade="all, delete-orphan")
 
 
 class EventMetaRow(Base):
@@ -167,3 +192,18 @@ class MessageRow(Base):
     logtim: Mapped[str] = mapped_column(String)
 
     event: Mapped[ErrorEventRow] = relationship(back_populates="messages")
+
+
+class ValuationRow(Base):
+    __tablename__ = "Event_Valuations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_uuid: Mapped[str] = mapped_column(ForeignKey("ErrorEvents.event_uuid"), index=True)
+    type: Mapped[str] = mapped_column(String)
+    value: Mapped[float] = mapped_column(Float)
+    unit: Mapped[str] = mapped_column(String)
+    source: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String)
+    is_primary: Mapped[bool] = mapped_column(default=False)
+
+    event: Mapped[ErrorEventRow] = relationship(back_populates="valuations")

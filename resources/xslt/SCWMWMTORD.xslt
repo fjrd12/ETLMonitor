@@ -1,3 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <xsl:output method="xml" indent="yes"/>
+
 <xsl:key name="qty-unit" match="_SCWM-E1LTORI" use="normalize-space(MEINS)"/>
   <xsl:template match="/">
     <xsl:variable name="idoc" select="(//*[local-name()='IDOC'])[1]"/>
@@ -50,3 +54,4 @@
       </xsl:otherwise>
     </xsl:choose>
   </xsl:template>
+</xsl:stylesheet>

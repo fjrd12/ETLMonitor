@@ -1,3 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <xsl:output method="xml" indent="yes"/>
+
 <xsl:key name="qty-unit"
            match="E1EDP01[not(UEPOS) or normalize-space(UEPOS)='' or number(UEPOS)=0]"
            use="normalize-space(MENEE)"/>
@@ -63,3 +67,4 @@
       </xsl:otherwise>
     </xsl:choose>
   </xsl:template>
+</xsl:stylesheet>

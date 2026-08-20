@@ -10,94 +10,138 @@
 <h1>IDoc Error Dashboard</h1>
 <p class="subtitle">{{ events|length }} error event(s) across {{ servers|length }} server(s)</p>
 
-<div class="summary-grid">
-  <div class="panel">
-    <h3>By month</h3>
+<div class="panel">
+  <h3>By month</h3>
+  <p class="subtitle">Events, breakdown by message type, and breakdown by business-value unit &mdash; columns ordered by total value, highest first.</p>
+  <div class="table-scroll">
     <table>
-      <tr><th>Month</th><th>Events</th><th>Total cost</th></tr>
-      {% for row in agg_monthly %}
-      <tr><td>{{ row.month }}</td><td>{{ row.event_count }}</td><td>{{ "%.2f"|format(row.total_amount) }}</td></tr>
+      <tr>
+        <th>Month</th>
+        <th class="num">Events</th>
+        {% for m in monthly.mestyp_columns %}<th class="num">{{ m }}</th>{% endfor %}
+        {% for u in monthly.unit_columns %}<th class="num">{{ u }}</th>{% endfor %}
+      </tr>
+      {% for row in monthly.rows %}
+      <tr>
+        <td>{{ row.month }}</td>
+        <td class="num">{{ row.events }}</td>
+        {% for v in row.by_mestyp %}<td class="num">{{ v }}</td>{% endfor %}
+        {% for v in row.by_unit %}<td class="num">{{ v }}</td>{% endfor %}
+      </tr>
       {% endfor %}
-    </table>
-  </div>
-  <div class="panel">
-    <h3>By system</h3>
-    <table>
-      <tr><th>Server</th><th>Sender</th><th>Receiver</th><th>Events</th><th>Total cost</th></tr>
-      {% for row in agg_by_system %}
-      <tr><td>{{ row.server }}</td><td>{{ row.sndprn }}</td><td>{{ row.rcvprn }}</td><td>{{ row.event_count }}</td><td>{{ "%.2f"|format(row.total_amount) }}</td></tr>
-      {% endfor %}
-    </table>
-  </div>
-  <div class="panel">
-    <h3>By error type</h3>
-    <table>
-      <tr><th>MESTYP</th><th>Status</th><th>Events</th><th>Total cost</th></tr>
-      {% for row in agg_by_error_type %}
-      <tr><td>{{ row.mestyp }}</td><td>{{ row.status }}</td><td>{{ row.event_count }}</td><td>{{ "%.2f"|format(row.total_amount) }}</td></tr>
-      {% endfor %}
-    </table>
-  </div>
-  <div class="panel">
-    <h3>Cost by server</h3>
-    <table>
-      <tr><th>Server</th><th>Events</th><th>Total cost</th><th>Currency</th></tr>
-      {% for row in agg_cost %}
-      <tr><td>{{ row.server }}</td><td>{{ row.event_count }}</td><td>{{ "%.2f"|format(row.total_amount) }}</td><td>{{ row.currency }}</td></tr>
-      {% endfor %}
+      <tr class="total-row">
+        <td>Total</td>
+        <td class="num">{{ monthly.total_row.events }}</td>
+        {% for v in monthly.total_row.by_mestyp %}<td class="num">{{ v }}</td>{% endfor %}
+        {% for v in monthly.total_row.by_unit %}<td class="num">{{ v }}</td>{% endfor %}
+      </tr>
     </table>
   </div>
 </div>
 
 <div class="panel">
-  <table id="events">
-    <thead>
-      <tr>
-        <th class="sortable" data-type="text">Date</th>
-        <th class="sortable" data-type="text">Server</th>
-        <th class="sortable" data-type="text">MESTYP</th>
-        <th class="sortable" data-type="text">Status</th>
-        <th class="sortable" data-type="num">DocNum</th>
-        <th class="sortable" data-type="num">Cost</th>
-        <th>Severity</th>
-        <th>Detail</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for e in events %}
-      <tr>
-        <td>{{ e.event_date }}</td>
-        <td>{{ e.server }}</td>
-        <td>{{ e.mestyp }}</td>
-        <td>{{ e.status }}</td>
-        <td>{{ e.docnum }}</td>
-        <td>{{ "%.2f"|format(e.amount or 0) }} {{ e.currency or "" }}</td>
-        <td><span class="badge {{ e.severity }}">{{ e.severity }}</span></td>
-        <td><a href="{{ e.detail_href }}">view</a></td>
-      </tr>
-      {% endfor %}
-    </tbody>
+  <h3>By system</h3>
+  <table>
+    <tr><th>Server</th><th>Sender</th><th>Receiver</th><th class="num">Events</th><th class="num">Total cost</th></tr>
+    {% for row in agg_by_system %}
+    <tr><td>{{ row.server }}</td><td>{{ row.sndprn }}</td><td>{{ row.rcvprn }}</td><td class="num">{{ row.event_count_fmt }}</td><td class="num">{{ row.total_amount_fmt }}</td></tr>
+    {% endfor %}
   </table>
 </div>
 
+<div class="panel">
+  <h3>By error type</h3>
+  <table>
+    <tr><th>MESTYP</th><th>Status</th><th class="num">Events</th><th class="num">Total cost</th></tr>
+    {% for row in agg_by_error_type %}
+    <tr><td>{{ row.mestyp }}</td><td>{{ row.status }}</td><td class="num">{{ row.event_count_fmt }}</td><td class="num">{{ row.total_amount_fmt }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="panel">
+  <h3>Cost by server</h3>
+  <table>
+    <tr><th>Server</th><th class="num">Events</th><th class="num">Total cost</th><th>Currency</th></tr>
+    {% for row in agg_cost %}
+    <tr><td>{{ row.server }}</td><td class="num">{{ row.event_count_fmt }}</td><td class="num">{{ row.total_amount_fmt }}</td><td>{{ row.currency }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="panel">
+  <div class="col-filter" id="col-filter"></div>
+  <div class="table-scroll">
+    <table id="events">
+      <thead>
+        <tr>
+          {% for key, label, dtype in columns %}
+          <th class="sortable{% if dtype == 'num' %} num{% endif %}" data-type="{{ dtype }}">{{ label }}</th>
+          {% endfor %}
+          <th class="no-sort">Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in events %}
+        <tr>
+          <td>{{ e.event_date }}</td>
+          <td>{{ e.server }}</td>
+          <td>{{ e.mestyp }}</td>
+          <td>{{ e.status }}</td>
+          <td class="num">{{ e.docnum }}</td>
+          <td class="num"><span class="badge {{ e.valuation_badge }}">{{ e.valuation_display }}</span></td>
+          <td><a href="{{ e.detail_href }}">view</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
 <script>
-  document.querySelectorAll("#events th.sortable").forEach(function (th, colIndex) {
-    var asc = true;
-    th.addEventListener("click", function () {
-      var table = th.closest("table");
-      var tbody = table.querySelector("tbody");
-      var rows = Array.prototype.slice.call(tbody.querySelectorAll("tr"));
+  (function () {
+    var table = document.getElementById("events");
+    var headers = table.querySelectorAll("th");
+
+    // Sorting (skips the trailing "Detail" column, which has no data-type).
+    headers.forEach(function (th, colIndex) {
       var type = th.dataset.type;
-      rows.sort(function (a, b) {
-        var av = a.children[colIndex].textContent.trim();
-        var bv = b.children[colIndex].textContent.trim();
-        if (type === "num") { av = parseFloat(av) || 0; bv = parseFloat(bv) || 0; return asc ? av - bv : bv - av; }
-        return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+      if (!type) return;
+      var asc = true;
+      th.classList.add("sortable");
+      th.addEventListener("click", function () {
+        var tbody = table.querySelector("tbody");
+        var rows = Array.prototype.slice.call(tbody.querySelectorAll("tr"));
+        rows.sort(function (a, b) {
+          var av = a.children[colIndex].textContent.trim();
+          var bv = b.children[colIndex].textContent.trim();
+          if (type === "num") {
+            av = parseFloat(av.replace(/,/g, "")) || 0;
+            bv = parseFloat(bv.replace(/,/g, "")) || 0;
+            return asc ? av - bv : bv - av;
+          }
+          return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+        });
+        rows.forEach(function (r) { tbody.appendChild(r); });
+        asc = !asc;
       });
-      rows.forEach(function (r) { tbody.appendChild(r); });
-      asc = !asc;
     });
-  });
+
+    // Column filter: one checkbox per header (all headers, "Detail" included).
+    var filterHost = document.getElementById("col-filter");
+    headers.forEach(function (th, colIndex) {
+      var label = document.createElement("label");
+      var box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = true;
+      box.addEventListener("change", function () {
+        table.classList.toggle("hide-col-" + (colIndex + 1), !box.checked);
+      });
+      label.appendChild(box);
+      label.appendChild(document.createTextNode(th.textContent.replace(/\s*↕\s*$/, "")));
+      filterHost.appendChild(label);
+    });
+  })();
 </script>
 
 </body>

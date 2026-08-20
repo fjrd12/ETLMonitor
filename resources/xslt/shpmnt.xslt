@@ -1,3 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <xsl:output method="xml" indent="yes"/>
+
 <xsl:key name="qty-unit" match="E1EDL24" use="normalize-space(VRKME)"/>
   <xsl:key name="weight-unit" match="E1EDL24" use="normalize-space(GEWEI)"/>
   <xsl:key name="volume-unit" match="E1EDL24" use="normalize-space(VOLEH)"/>
@@ -59,3 +63,4 @@
       </xsl:otherwise>
     </xsl:choose>
   </xsl:template>
+</xsl:stylesheet>

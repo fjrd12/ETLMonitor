@@ -19,7 +19,27 @@
     <tr><td class="field-name">Date / time</td><td>{{ event.event_date }} {{ event.event_time }}</td></tr>
     <tr><td class="field-name">User</td><td>{{ event.uname }}</td></tr>
     <tr><td class="field-name">Message</td><td>{{ event.statxt }}</td></tr>
-    <tr><td class="field-name">Estimated cost</td><td>{{ "%.2f"|format(event.amount or 0) }} {{ event.currency or "" }}</td></tr>
+    <tr><td class="field-name">Monetary cost</td><td>{% if event.amount_fmt %}<span class="num">{{ event.amount_fmt }}</span> {{ event.currency }}{% else %}n/a &mdash; not an AMOUNT-type valuation{% endif %}</td></tr>
+  </table>
+</div>
+
+<div class="panel">
+  <h3>Business valuation</h3>
+  <p class="subtitle">Computed by resources/xslt/*.xslt at ETL 2 from the raw IDoc payload &mdash; see <a href="#raw-xml">raw CONTENT.xml</a> below.</p>
+  <table>
+    <tr><th>Primary</th><th>Type</th><th class="num">Value</th><th>Unit</th><th>Status</th><th>Source</th></tr>
+    {% for v in valuations %}
+    <tr>
+      <td>{{ "✓" if v.is_primary else "" }}</td>
+      <td>{{ v.type }}</td>
+      <td class="num">{{ v.value_fmt }}</td>
+      <td>{{ v.unit }}</td>
+      <td><span class="badge {{ v.badge }}">{{ v.status }}</span></td>
+      <td>{{ v.source }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6">No valuation could be computed &mdash; {{ event.valuation_status }}</td></tr>
+    {% endfor %}
   </table>
 </div>
 
@@ -34,18 +54,35 @@
 </div>
 
 <div class="panel">
-  <h3>Segments</h3>
-  {% for seg in meta %}
-  <h4>{{ seg.segment }}</h4>
+  <h3>Control record (EDI_DC40)</h3>
+  {% if control_record %}
   <table class="meta-table">
-    {% for f in seg.fields %}
+    {% for f in control_record.fields %}
     <tr><td class="field-name">{{ f.field_name }}</td><td>{{ f.field_value }}</td></tr>
     {% endfor %}
   </table>
-  {% endfor %}
+  {% else %}
+  <p class="subtitle">No EDI_DC40 segment found in the payload.</p>
+  {% endif %}
 </div>
 
 <div class="panel">
+  <h3>Status (EDI_DS40)</h3>
+  {% if status_table.rows %}
+  <div class="table-scroll">
+    <table>
+      <tr>{% for h in status_table.headers %}<th>{{ h }}</th>{% endfor %}</tr>
+      {% for row in status_table.rows %}
+      <tr>{% for v in row %}<td>{{ v }}</td>{% endfor %}</tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% else %}
+  <p class="subtitle">No EDI_DS40 segment found in the payload.</p>
+  {% endif %}
+</div>
+
+<div class="panel" id="raw-xml">
   <h3>Raw CONTENT.xml</h3>
   <pre class="raw-xml">{{ raw_xml }}</pre>
 </div>

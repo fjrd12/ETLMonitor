@@ -1,8 +1,9 @@
 """ETL 3 — warehouse.
 
-For each UUID folder under servers/<SERVER>/output, parses the monetized
-triplet, looks up an estimated cost, and upserts an ErrorEvent (+ its
-Messages and Event_Meta segments) into the configured EventSink.
+For each UUID folder under servers/<SERVER>/output, parses the valuated
+quadruplet (CTRL, STAT, CONTENT, VALUATION), classifies severity, and
+upserts an ErrorEvent (+ its Messages, Event_Meta segments, and
+Event_Valuations) into the configured EventSink.
 """
 from __future__ import annotations
 
@@ -17,10 +18,14 @@ from etl.cost_rules import CostRules
 from etl.models import CtrlRecord, ErrorEvent
 from etl.models import EventMeta as EventMetaDTO
 from etl.models import Message as MessageDTO
-from etl.models import MetaField, StatRecord
+from etl.models import MetaField, StatRecord, Valuation
 from etl.sinks import EventSink, SqliteEventSink
 
 logger = logging.getLogger(__name__)
+
+# Valuation statuses where VALUE/UNIT reflect a real computed number, as
+# opposed to a rule mismatch or missing source data in the payload.
+COMPUTED_STATUSES = {"VALUATED", "VALUATED_WITH_OPERATIONAL_FALLBACK"}
 
 
 def extract_meta(content_path: Path) -> list[EventMetaDTO]:
@@ -46,17 +51,54 @@ def extract_meta(content_path: Path) -> list[EventMetaDTO]:
     return [EventMetaDTO(segment=segment.tag, fields=leaves(segment, "")) for segment in idoc]
 
 
-def load_event(uuid_dir: Path, cost_rules: CostRules) -> tuple[ErrorEvent, list[MessageDTO], list[EventMetaDTO]]:
+def extract_valuations(valuation_path: Path) -> tuple[list[Valuation], str]:
+    """Parse an <IDOC_VALUATION> sidecar (see resources/xslt/*.xslt) into
+    Valuation DTOs, plus the document's top-level <STATUS> (only present
+    when there's no <VALUATIONS> child, i.e. a MESTYP/IDOCTYP mismatch or a
+    missing monetizer.json rule).
+    """
+    root = etree.parse(str(valuation_path)).getroot()
+    valuations = [
+        Valuation(
+            type=(v.findtext("TYPE") or "").strip(),
+            value=float(v.findtext("VALUE") or 0),
+            unit=(v.findtext("UNIT") or "").strip(),
+            source=(v.findtext("SOURCE") or "").strip(),
+            status=(v.findtext("STATUS") or "").strip(),
+            primary=(v.get("primary") == "true"),
+        )
+        for v in root.findall("./VALUATIONS/VALUATION")
+    ]
+    top_status = (root.findtext("STATUS") or "").strip()
+    return valuations, top_status
+
+
+def primary_valuation(valuations: list[Valuation], fallback_status: str) -> Valuation:
+    for v in valuations:
+        if v.primary:
+            return v
+    if valuations:
+        return valuations[0]
+    return Valuation(type="NONE", value=0.0, unit="", source="", status=fallback_status, primary=False)
+
+
+def load_event(
+    uuid_dir: Path, cost_rules: CostRules
+) -> tuple[ErrorEvent, list[MessageDTO], list[EventMetaDTO], list[Valuation]]:
     stem = next(p.name.removesuffix("_CTRL.json") for p in uuid_dir.glob("*_CTRL.json"))
     ctrl_path = uuid_dir / f"{stem}_CTRL.json"
     stat_path = uuid_dir / f"{stem}_STAT.json"
     content_path = uuid_dir / f"{stem}_CONTENT.xml"
+    valuation_path = uuid_dir / f"{stem}_VALUATION.xml"
 
     ctrl = CtrlRecord.model_validate(json.loads(ctrl_path.read_text()))
     stat = StatRecord.model_validate(json.loads(stat_path.read_text()))
     control = ctrl.CONTROL
 
-    cost = cost_rules.lookup(control.MESTYP, control.STATUS)
+    valuations, top_status = extract_valuations(valuation_path)
+    primary = primary_valuation(valuations, top_status or "UNSUPPORTED_MESTYP_OR_IDOCTYP")
+
+    is_amount = primary.type == "AMOUNT" and primary.status in COMPUTED_STATUSES
 
     event = ErrorEvent(
         event_uuid=ctrl.GLOBAL_UUID,
@@ -72,10 +114,15 @@ def load_event(uuid_dir: Path, cost_rules: CostRules) -> tuple[ErrorEvent, list[
         uname=stat.UNAME,
         statxt=stat.STATXT,
         loaded_at=dt.datetime.now(dt.timezone.utc),
-        amount=cost.amount,
-        currency=cost.currency,
-        severity=cost.severity,
+        amount=primary.value if is_amount else None,
+        currency=primary.unit if is_amount else None,
+        severity=cost_rules.severity(control.MESTYP, control.STATUS),
         monetized=True,
+        valuation_type=primary.type,
+        valuation_value=primary.value if primary.type != "NONE" else None,
+        valuation_unit=primary.unit or None,
+        valuation_status=primary.status,
+        valuation_source=primary.source or None,
     )
     messages = [
         MessageDTO(
@@ -89,7 +136,7 @@ def load_event(uuid_dir: Path, cost_rules: CostRules) -> tuple[ErrorEvent, list[
         )
     ]
     meta = extract_meta(content_path)
-    return event, messages, meta
+    return event, messages, meta, valuations
 
 
 def run(servers_root: Path, resources_root: Path) -> int:
@@ -101,10 +148,11 @@ def run(servers_root: Path, resources_root: Path) -> int:
             continue
         sink: EventSink = SqliteEventSink(server_dir / "DW" / "idoc_events.db")
         for uuid_dir in sorted(p for p in output_root.iterdir() if p.is_dir()):
-            event, messages, meta = load_event(uuid_dir, cost_rules)
+            event, messages, meta, valuations = load_event(uuid_dir, cost_rules)
             sink.upsert_event(event)
             sink.upsert_messages(event.event_uuid, messages)
             sink.upsert_meta(event.event_uuid, meta)
+            sink.upsert_valuations(event.event_uuid, valuations)
             count += 1
             logger.info("warehoused %s (%s)", event.docnum, event.mestyp)
     return count

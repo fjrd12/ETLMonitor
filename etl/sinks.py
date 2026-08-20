@@ -21,6 +21,8 @@ from etl.models import (
     EventMetaRow,
     Message,
     MessageRow,
+    Valuation,
+    ValuationRow,
 )
 
 # (view_name, SELECT body) — created after the schema, dropped/recreated each
@@ -69,6 +71,16 @@ AGGREGATE_VIEWS: list[tuple[str, str]] = [
         GROUP BY server, currency
         """,
     ),
+    (
+        "agg_valuation_by_type",
+        """
+        SELECT mestyp, valuation_type, valuation_unit,
+               COUNT(*) AS event_count,
+               COALESCE(SUM(valuation_value), 0) AS total_value
+        FROM ErrorEvents
+        GROUP BY mestyp, valuation_type, valuation_unit
+        """,
+    ),
 ]
 
 
@@ -81,6 +93,9 @@ class EventSink(ABC):
 
     @abstractmethod
     def upsert_meta(self, event_uuid: str, meta: list[EventMeta]) -> None: ...
+
+    @abstractmethod
+    def upsert_valuations(self, event_uuid: str, valuations: list[Valuation]) -> None: ...
 
 
 class SqliteEventSink(EventSink):
@@ -117,6 +132,11 @@ class SqliteEventSink(EventSink):
             row.currency = event.currency
             row.severity = event.severity
             row.monetized = event.monetized
+            row.valuation_type = event.valuation_type
+            row.valuation_value = event.valuation_value
+            row.valuation_unit = event.valuation_unit
+            row.valuation_status = event.valuation_status
+            row.valuation_source = event.valuation_source
             row.loaded_at = event.loaded_at
             session.commit()
 
@@ -147,4 +167,21 @@ class SqliteEventSink(EventSink):
                     EventMetaFieldRow(field_name=f.field_name, field_value=f.field_value) for f in m.fields
                 ]
                 session.add(meta_row)
+            session.commit()
+
+    def upsert_valuations(self, event_uuid: str, valuations: list[Valuation]) -> None:
+        with Session(self._engine) as session:
+            session.query(ValuationRow).filter_by(event_uuid=event_uuid).delete()
+            for v in valuations:
+                session.add(
+                    ValuationRow(
+                        event_uuid=event_uuid,
+                        type=v.type,
+                        value=v.value,
+                        unit=v.unit,
+                        source=v.source,
+                        status=v.status,
+                        is_primary=v.primary,
+                    )
+                )
             session.commit()
